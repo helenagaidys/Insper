@@ -1,0 +1,611 @@
+---
+title: "Carseats"
+author: "Helena Boin Gaidys"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+*OBJETIVO:* Para esse trabalho, usei a base de dados Carseats presente no pacote ISLR. Tenho como objetivo prever a variável Advertising em função das demais.
+
+Para isso, organizei o trabalho nos seguintes passos:
+
+  -- Exploração dos dados
+  -- Modelagem (métodos SVM linear, SVM, SVM radial, random forest e boosting)
+  -- Resultados
+  
+  
+
+# Bibliotecas
+
+```{r pacotes, message=FALSE, warning=FALSE}
+
+library(tidymodels)
+library(tidyverse)
+library(ISLR)
+library(ggcorrplot)
+library(GGally)
+library(naniar)
+library(vip)
+library(skimr)
+
+```
+
+# Leitura da base de dados
+
+```{r dataset}
+
+dados <- ISLR::Carseats
+
+dados %>% glimpse
+
+```
+
+# Exploração dos dados
+
+## Dados faltantes
+
+Não há dados faltantes.
+
+```{r dados faltantes}
+
+naniar::vis_miss(dados)
+
+```
+
+## Estatísticas de Resumo
+
+```{r skimr}
+
+skimr::skim(dados)
+
+```
+
+## Gráfico de correlação
+
+Como é de se esperar, preço e venda estão altamente correlacionados, assim como preço e preço do concorrente.
+
+É interessante notar que venda é consideravelmente correlacionada com o budget em propaganda, o que indica que esse investimento em marketing funciona.
+
+Também vale ressaltar que o investimento em propaganda é maior conforme a população da cidade aumenta, mas as vendas não são muito correlacionadas com a população, o que é contra intuitivo e requer maior investigação das causas. Uma conclusão possível seria dizer que só se vende quando há investimento em marketing. Outra conclusão poderia ser que não há um investimento em propaganda proporcional ao tamanho da cidade.
+
+Outro fator curioso é que venda é negativamente correlacionada com a idade, o que faz sentido porque se trata da venda de assento de bebê para carro, e pessoas na faixa de idade mais propensa a serem pais são o público alvo. No entanto, o investimento em marketing não tem correlação, o que mostra que a publicidade não está direcionada ao seu público alvo, mas sim a todos num geral. 
+
+
+
+
+```{r corrplot}
+dados %>% 
+  select(-ShelveLoc, -Urban, -US) %>% 
+  cor() %>% 
+  ggcorrplot(lab = TRUE, lab_size = 4, tl.cex = 9,
+             colors = c("#FC4E07", "#fdfdfd", "#00AFBB"))
+```
+
+Vendo a correlação entre as variáveis Sales e Population para observações onde não teve budget de marketing, pode-se ver que a correlação entre elas é ainda menor. Então, ao que tudo indica, o censo comum (se esperar que em uma cidade com mais pessoas, vende-se mais) não acontece.
+
+```{r}
+
+dados %>% 
+  subset(Advertising == 0, 
+select=c(Sales, Population)) %>% 
+  cor()
+
+```
+
+
+## Procurando relações entre as variáveis
+
+Mais adiante abro os gráficos mais interessantes para uma investigação mais aprofundada, mas pelos dois gráficos abaixo, alguns fatores são observados. Primeiramente, a maioria das lojas encontram-se dentro do território americano. Em segundo lugar, a maioria das prateleiras estão em condição média. Por último, as vendas são maiores em prateleiras em boas condições.
+
+```{r ggpairs, message=FALSE, fig.width=10, fig.height=10}
+
+GGally::ggpairs(dados)
+
+```
+```{r plot, fig.width=10, fig.height=10}
+
+plot(dados)
+
+```
+
+## Algumas relações importantes
+
+### Vendas x Preço
+
+Como é de se esperar, a venda diminui de acordo com o aumento do preço.
+
+```{r vendas x preço}
+
+dados %>% 
+  ggplot(aes(Price, Sales)) +
+  geom_point() +
+  geom_smooth(method = "lm", size = 3)
+
+```
+
+### Preço x Preço do concorrente
+
+O preço da marca e o preço dos concorrentes possuem uma relação linear.
+
+```{r price x compPrice}
+
+dados %>% 
+  ggplot(aes(Price, CompPrice)) +
+  geom_point() +
+  geom_smooth(method = "lm", size = 3)
+
+```
+
+### Vendas x Preço do concorrente
+
+Como o preço sobe conforme o preço do concorrente também sobe, percebe-se pelo gráfico abaixo que a marca não usa o preço como diferencial para ganhar da concorrência. O usual é ver as vendas aumentando conforme o preço do concorrente aumenta e o próprio se mantém.
+
+```{r Sales x CompPrice}
+
+dados %>% 
+  ggplot(aes(Sales, CompPrice)) +
+  geom_point() +
+  geom_smooth(method = "lm", size = 3)
+
+```
+
+### Budget com propaganda x População
+
+Pelo gráfico abaixo, alguns poucos pontos mostram um investimento maior em cidades maiores. Porém, na maioria dos casos, não importa o tamanho do local para se decidir o budget.
+
+```{r}
+
+dados %>% 
+  ggplot(aes(Advertising, Population)) +
+  geom_point() +
+  geom_smooth(method = "lm", size = 3)
+
+```
+
+### Budget com propaganda x Idade
+
+Em pouquíssimos casos há um investimento maior focado em idades menores.
+
+```{r}
+
+dados %>% 
+  ggplot(aes(Advertising, Age)) +
+  geom_point() +
+  geom_smooth(method = "lm", size = 3)
+
+```
+
+### Vendas x Idade
+
+Há uma relação entre vendas e idade, conforme visto anteriormente.
+
+```{r}
+
+dados %>% 
+  ggplot(aes(Sales, Age)) +
+  geom_point() +
+  geom_smooth(method = "lm", size = 3)
+
+```
+
+
+# Modelagem
+
+## Treinamento e teste
+
+```{r treinamento e teste}
+
+set.seed(321)
+
+split <- initial_split(dados, prop = 0.8)
+
+treinamento <- training(split)
+teste <- testing(split)
+
+```
+
+## Processamento dos dados
+
+```{r processamento}
+
+receita <- recipe(Advertising ~ ., treinamento) %>% 
+            step_normalize(all_numeric()) %>%
+            step_pca(all_numeric(), -all_outcomes(), threshold = 0.75) %>% 
+            step_dummy(all_nominal(), -all_outcomes())
+            
+
+receita_prep <- prep(receita)
+
+treinamento_proc <- juice(receita_prep)
+teste_proc <- bake(receita_prep, new_data = teste)
+
+```
+
+## PCA
+
+```{r acessar pca}
+
+receita_prep$steps[[2]]$res
+
+```
+
+### Variância Acumulada
+
+Serão usados quatro componentes que explicam 73,64% da variância.
+
+```{r var. acumulada}
+
+cumsum(receita_prep$steps[[2]]$res$sdev^2) / sum(receita_prep$steps[[2]]$res$sdev^2)
+
+```
+
+## SVM Linear
+
+```{r svm linear}
+
+svm <- svm_poly(cost = tune()) %>% 
+        set_args(kernel = "vanilladot") %>% 
+        set_mode("regression") %>% 
+        set_engine("kernlab")
+
+set.seed(321)
+
+cv_split <- vfold_cv(treinamento, v = 10)
+
+doParallel::registerDoParallel()
+
+grid_lm <- tune_grid(svm, 
+                     receita,
+                     resamples = cv_split, 
+                     grid = 20)
+
+```
+
+```{r}
+
+autoplot(grid_lm)
+
+```
+
+
+```{r}
+
+grid_lm %>% 
+  collect_metrics()
+
+```
+
+```{r}
+
+show_best(grid_lm, metric = "rmse")
+
+```
+
+
+```{r}
+
+best <- grid_lm %>% 
+          select_best(metric = "rmse")
+
+
+svm_lm <- finalize_model(svm, parameters = best)
+
+svm_fit <- fit(svm_lm, 
+               Advertising ~ ., 
+               data = treinamento_proc)
+
+fitted <- svm_fit %>% 
+            predict(new_data = teste_proc) %>%
+             mutate(observado = teste_proc$Advertising, 
+                    modelo = "linear")
+
+```
+
+## SVM
+
+```{r svm}
+
+svm <- svm_poly(degree = tune(), scale = tune()) %>% 
+        set_mode("regression") %>% 
+        set_engine("kernlab")
+
+doParallel::registerDoParallel()
+
+grid_poly <- tune_grid(svm, 
+                       receita,
+                       resamples = cv_split, 
+                       grid = 20)
+
+```
+
+```{r}
+
+autoplot(grid_poly)
+
+```
+
+```{r}
+
+grid_poly %>% 
+  collect_metrics()
+
+```
+
+```{r}
+
+show_best(grid_poly, metric = "rmse")
+
+```
+
+```{r}
+
+best <- grid_poly %>% 
+          select_best(metric = "rmse")
+
+
+svm_poly <- finalize_model(svm, parameters = best)
+
+svm_fit <- fit(svm_poly, 
+               Advertising ~ ., 
+               data = treinamento_proc)
+
+
+fitted <- bind_rows(fitted, 
+                    svm_fit %>% 
+                      predict(new_data = teste_proc) %>%
+                      mutate(observado = teste_proc$Advertising, 
+                             modelo = "poly"))
+
+
+```
+
+## SVM Radial
+
+```{r svm radial}
+
+svm_rad <- svm_rbf(cost = tune(), rbf_sigma = tune()) %>% 
+                   set_mode("regression") %>% 
+                   set_engine("kernlab")
+
+doParallel::registerDoParallel()
+
+grid_rad <- tune_grid(svm_rad, 
+                      receita,
+                      resamples = cv_split, 
+                      grid = 20)
+```
+
+```{r}
+
+autoplot(grid_rad)
+
+```
+
+```{r}
+
+grid_rad %>% 
+  collect_metrics()
+
+```
+
+```{r}
+
+show_best(grid_rad, metric = "rmse")
+
+```
+
+```{r}
+
+best_rad <- grid_rad %>% 
+              select_best(metric = "rmse")
+
+
+svm_rad <- finalize_model(svm_rad, parameters = best_rad)
+
+svm_rad <- fit(svm_rad, 
+               Advertising ~ ., 
+               data = treinamento_proc)
+
+
+fitted <- bind_rows(fitted, 
+                    svm_rad %>% 
+                      predict(new_data = teste_proc) %>%
+                      mutate(observado = teste_proc$Advertising, 
+                             modelo = "radial"))
+
+```
+
+## Random Forest
+
+```{r random forest}
+
+rf <- rand_forest() %>% 
+        set_engine("ranger", importance = "permutation") %>%
+        set_mode("regression")
+
+rf_fit <- rf %>% 
+            fit(Advertising ~ ., treinamento_proc)
+```
+
+A loja ser nos Estados Unidos é o principal fator para determinar o valor de investimento em marketing. Em segundo lugar vem a componente 2 (PC2), que tem como principal variável vendas (Sales) e opostamente, idade (Age).
+
+```{r}
+
+#importância
+vip(rf_fit)
+
+```
+
+```{r}
+
+fitted <- bind_rows(fitted, 
+                    rf_fit %>% 
+                      predict(new_data = teste_proc) %>%
+                      mutate(observado = teste_proc$Advertising, 
+                             modelo = "random forest"))
+
+```
+
+```{r ajuste hiperparâmetros}
+
+rf2 <- rand_forest(mtry = tune(), trees = tune()) %>% 
+        set_engine("ranger") %>%
+        set_mode("regression")
+
+
+doParallel::registerDoParallel()
+
+rf_grid <- tune_grid(rf2, 
+                     receita, 
+                     resamples = cv_split, 
+                     grid = 20, 
+                     metrics = metric_set(rmse, mae))
+
+```
+
+```{r}
+
+autoplot(rf_grid)
+
+```
+
+```{r}
+
+rf_grid %>% 
+  collect_metrics()
+
+```
+
+```{r}
+
+show_best(rf_grid, metric = "rmse")
+
+```
+
+```{r}
+
+rf_grid %>% select_best("rmse")
+
+best <- rf_grid %>% 
+         select_best("rmse")
+
+# finaliza modelo
+rf_fit2 <- finalize_model(rf2, parameters = best) %>% 
+            fit(Advertising ~ ., treinamento_proc)
+
+fitted <- bind_rows(fitted, 
+                    rf_fit2 %>% 
+                      predict(new_data = teste_proc) %>%
+                      mutate(observado = teste_proc$Advertising, 
+                             modelo = "random forest - tune"))
+
+```
+
+## Boosting
+
+```{r boosting}
+
+bst <- boost_tree() %>% 
+        set_engine("xgboost") %>%
+        set_mode("regression")
+
+bst_fit <- bst %>% 
+            fit(Advertising ~ ., treinamento_proc)
+```
+
+Aqui também o principal fator para a decisão do budget de marketing é o local da loja ser dentro dos Estados Unidos (US_Yes). Em segundo lugar vem a componente 1 (PC1), que tem como principais variáveis o preço (Price) e o preço do concorrente (prcomp).
+
+```{r}
+
+# importância
+vip(bst_fit)
+
+```
+
+```{r}
+
+fitted <- bind_rows(fitted, 
+                    bst_fit %>% 
+                      predict(new_data = teste_proc) %>%
+                      mutate(observado = teste_proc$Advertising, 
+                             modelo = "boosting"))
+
+```
+
+## LASSO
+
+```{r LASSO}
+
+lasso <- linear_reg(penalty = tune(), mixture = 1) %>% 
+        set_engine("glmnet") %>%
+        set_mode("regression") 
+
+
+lambda_tune <- tune_grid(lasso, 
+                         receita,
+                         resamples = cv_split, 
+                         metrics = metric_set(rmse, mae),
+                         grid = 20)
+```
+
+```{r}
+
+autoplot(lambda_tune) 
+
+```
+
+```{r}
+
+lambda_tune %>% 
+  collect_metrics()
+
+```
+
+```{r}
+
+show_best(lambda_tune, metric = "rmse")
+
+```
+
+```{r}
+
+best <- lambda_tune %>% 
+         select_best("rmse")
+
+lasso <- finalize_model(lasso, parameters = best)
+
+fit_lasso <- fit(lasso, 
+                 Advertising ~ ., 
+                 data = treinamento_proc)
+
+fitted <- fitted %>% 
+  bind_rows(fit_lasso %>% 
+              predict(new_data = teste_proc) %>%
+              mutate(observado = teste_proc$Advertising, 
+              modelo = "lasso"))
+
+```
+
+# Resultados
+
+De acordo com a tabela a seguir, os modelos performaram na seguinte ordem (do melhor ao pior, usando o rmse):
+
+1) SVM Radial
+2) LASSO
+3) SVM Linear
+4) Random Forest - Tune
+5) SVM Polinomial
+6) Random Forest
+7) Boosting
+
+```{r resultado}
+
+fitted %>% 
+  group_by(modelo) %>% 
+  metrics(truth = observado, estimate = .pred)
+
+```
+
