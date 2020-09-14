@@ -1,0 +1,325 @@
+---
+title: "Instacart"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    logo: instacart_logo.png
+runtime: shiny
+---
+
+<style>                     
+.navbar {
+  background-color:#0F4C04;
+}
+.navbar-inverse .navbar-nav > li > a:hover,
+.navbar-inverse .navbar-nav > li > a:focus {
+    background-color: #FC8204;
+    color: white;
+}
+.navbar-inverse .navbar-nav > .active > a,
+.navbar-inverse .navbar-nav > .active > a:hover,
+.navbar-inverse .navbar-nav > .active > a:focus {
+  color: white;
+  background-color: #FC8204;
+}
+.navbar-inverse .navbar-toggle:hover,
+.navbar-inverse .navbar-toggle:focus {
+  background-color: #FC8204;
+}
+.navbar-inverse .navbar-collapse,
+.navbar-inverse .navbar-form {
+  border-color: #FC8204;
+}
+
+  .first-box {
+    background-color: #3DB12B;
+  }
+  
+  .second-box {
+    background-color: #3DB12B;
+  }
+  
+  .third-box {
+    background-color: #3DB12B;
+  }
+  
+  .fourth-box {
+    background-color: #3DB12B;
+  }
+
+</style>
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+knitr::opts_chunk$set(echo = FALSE, fig.align="center")
+```
+
+```{r global, include=FALSE}
+
+if(!require(tidyverse)){install.packages("tidyverse"); library(tidyverse)}
+if(!require(patchwork)){devtools::install_github("thomasp85/patchwork"); library(patchwork)}
+if(!require(RColorBrewer)){install.packages("RColorBrewer"); library(RColorBrewer)}
+if(!require(fmsb)){install.packages("fmsb"); library(fmsb)}
+if(!require(rsconnect)){install.packages("rsconnect"); library(rsconnect)}
+
+# load data in 'global' chunk so it can be shared by all users of the dashboard
+personas <- read_csv("./data/personas.csv")
+grupos <- read_csv("./data/grupos.csv")
+paleta <- tibble(cluster = c("Karen", "Persona_1", "Persona_2", "Persona_3", "Persona_4", "Persona_5"),
+                 color = c('#66a61e', '#1b9e77', '#d95f02', '#7570b3', '#e7298a', '#e6ab02'))
+freq_user <- read.csv("data/freq_user.csv") %>% 
+  rename(Media_lag = day_mean,
+         Dispersao_lag = day_sd,
+         Correlacao_lag = correl,
+         Qtd_Orders = qtd_order,
+         Qtd_Produtos = qtd_produtos)
+```
+Início
+=======================================================================
+
+Column {data-height=2100}
+-----------------------------------------------------------------------
+### {.first-box}
+<center>
+![](instacart.jpg)
+</center>
+
+### {.second-box}
+<span style="color: white;font-size:36px;">
+**Grupo 01:**
+<br>
+Helena Boin Gaidys
+<br>
+Luís Fernando Baldan Bechio
+<br>
+Lucas Marra
+<br>
+Renato Camargo
+</span>
+
+Radar
+=======================================================================
+
+Column {data-width=100}
+-----------------------------------------------------------------------
+
+### {.third-box}
+```{r}
+
+selectInput("Persona", "Escolha uma persona", c('Karen', 'Persona_1', 'Persona_2', 'Persona_3', 'Persona_4','Persona_5'), selected = "Karen")
+varSelectInput("var", "Selecione a variavel", freq_user[3:7])
+
+```
+
+Column
+-----------------------------------------------------------------------
+
+### Radar {data-height=400}
+
+```{r}
+
+personas <- personas %>% 
+  mutate(order = c(1,2,4,5,6,7,3,8)) %>% 
+  arrange(order) %>% 
+  select(-order) %>% 
+  rename(Media_lag = day_mean,
+         Dispersao_lag = day_sd,
+         Correlacao_lag = correl,
+         Qtd_Orders = qtd_order,
+         Qtd_Produtos = qtd_produtos)
+         
+
+div(plotOutput("radar", height = "100%"), align = "center")
+# fillCol(width = 1000, flex = 1,
+#   plotOutput("radar", width = "100%"))
+
+  output$radar <- renderPlot ({
+
+    # Prepare color
+    borda= alpha(c('#66a61e','#1b9e77', '#d95f02', '#7570b3', '#e7298a', '#e6ab02'), 1)
+    inter=alpha(c('#66a61e', '#1b9e77', '#d95f02', '#7570b3', '#e7298a', '#e6ab02'), 0.5)
+    
+    # Prepare title
+    mytitle <- c('Karen', 'Persona_1', 'Persona_2', 'Persona_3',
+                 'Persona_4', 'Persona_5')
+    
+    borda
+    
+    # Split the screen in 6 parts
+    #par(mar=rep(0.8,4))
+    #par(mfrow=c(2,3))
+    
+  
+    # Loop for each plot
+    i = case_when(input$Persona == 'Persona_1' ~  2,
+              input$Persona == 'Persona_2' ~  3,
+              input$Persona == 'Persona_3' ~  4,
+              input$Persona == 'Persona_4' ~  5,
+              input$Persona == 'Karen' ~  1,
+              input$Persona == 'Persona_5' ~  6
+              )
+
+     
+      # Custom the radarChart !
+      radarchart( personas[c(1,2,i+2),], axistype=1, 
+                  
+                  #custom polygon
+                  pcol = borda[i] , pfcol=inter[i] , plwd=4, plty=1 , 
+                  
+                  #custom the grid
+                  cglcol="grey", cglty=1, axislabcol="grey", ccglwd=0.8,
+                  
+                  #custom labels
+                  vlcex=1,
+                  
+                  #title
+                  title = "Médias normalizadas das métricas utilizadas na clusterização"
+      )
+  
+}, height = 350, width = 600)
+```
+
+
+### Boxplot
+
+```{r}
+
+freq_user <- freq_user %>% 
+    mutate(nome_persona = case_when(cluster == 1 ~ 'Persona_1',
+                                    cluster == 2 ~ 'Persona_2',
+                                    cluster == 3 ~ 'Persona_3',
+                                    cluster == 4 ~ 'Persona_4',
+                                    cluster == 5 ~ 'Karen',
+                                    cluster == 6 ~ 'Persona_5')) %>% 
+    arrange(nome_persona)
+      
+
+
+# ui <- fluidPage(
+#   varSelectInput("var", "Selecione a variavel", freq_user[3:7]),
+#   selectInput("persona", "Selecione a persona", unique(freq_user$nome_persona),selected = "Karen"),
+#   plotOutput("boxplot")
+# )
+
+# server <- function(input, output, session){
+#   
+#   output$boxplot <- renderPlot({
+
+renderPlot({
+  
+  titulo <- case_when(input$var == "Media_lag" ~ "Média de dias entre as compras",
+                      input$var == "Dispersao_lag" ~ "Dispersão de dias entre as compras",
+                      input$var == "Correlacao_lag" ~ "Correlação entre dias desde o último pedido e ordem do pedido",
+                      input$var == "Qtd_Orders" ~ "Média de quantidade de ordens por usuário",
+                      input$var == "Qtd_Produtos" ~ "Média de quantidade de pedidos por usuário")
+  
+  
+  paleta <- case_when(input$Persona == "Karen" ~ '#66a61e',
+                      input$Persona == "Persona_1" ~ '#1b9e77',
+                      input$Persona == "Persona_2" ~ '#d95f02',
+                      input$Persona == "Persona_3" ~ '#7570b3',
+                      input$Persona == "Persona_4" ~ '#e7298a',
+                      input$Persona == "Persona_5" ~ '#e6ab02')
+
+  colors <- ifelse(levels(as.factor(freq_user$nome_persona)) == input$Persona, paleta, "gray68")   
+  
+   freq_user %>%
+      ggplot(aes(x=as.character(freq_user$nome_persona) , y=!!input$var)) +
+      geom_boxplot(fill = colors, alpha = 0.8) +
+      theme(legend.position="none",
+          axis.line=element_blank(), 
+          panel.border =element_blank(), 
+          panel.grid.major.x =element_blank(),
+          plot.title = element_text(size=16),
+          axis.title = element_text(size = 14),
+          axis.text = element_text(size = 12)) +
+          theme_minimal() +
+          labs(x = "",
+          y = input$var,
+          title = titulo)
+  })
+# }
+
+# shinyApp(ui, server)
+
+```
+
+
+### {data-height=100}
+<span style="font-size:12px;">
+As variáveis Media_lag, Dispersao_lag e Correlacao_lag dizem respeito à variável dias desde o último pedido. </br>
+Correlação entre o dia entre o último pedido e o número da ordem. Se a correlação for alta, significa que a cada pedido, aumenta-se o lag de dias. Se for baixa, quer dizer que a cada pedido, diminui-se o lag de dias. Se a correlação for próxima de zero, o lag é constante.
+</span>
+
+Produtos
+=======================================================================
+
+Column {data-width=100}
+-----------------------------------------------------------------------
+
+### {.fourth-box}
+
+```{r}
+selectInput(inputId = "select_in", label = "Selecionar:",
+            choices = unique(grupos$cluster), selected = "Karen")
+```
+
+Column
+-----------------------------------------------------------------------
+
+###
+
+```{r}
+# cria variavel reativa com o cluster selecionado:
+selectedCluster <- reactive({
+    input$select_in
+  })
+
+# Plotagem dos resultados
+renderPlot({
+  p <- paleta %>% 
+  filter(cluster == selectedCluster()) %>% 
+  pull(color)
+  
+  # c <- paleta %>% 
+  # filter(cluster == selectedCluster()) %>% 
+  # pull(cluster)
+  
+  grupos %>%
+    mutate(cluster = ifelse(cluster == !!selectedCluster(), !!selectedCluster(), " Outros")) %>%
+    group_by(cluster, department) %>%
+    summarise(n = sum(n)) %>%
+    group_by(cluster) %>%
+    mutate(f = 100*n/sum(n)) %>%
+    ggplot() +
+    aes(x = reorder(department, f), y = f, fill = cluster) +
+    geom_col(position = "Dodge", alpha = 0.7)+
+    scale_fill_manual(breaks = c(paste0(selectedCluster()), ' Outros'),
+                      values = c(p, "gray68"))+
+    scale_y_continuous(name = "Composição da Sacola",
+                       limits = c(0, 32.5),
+                       breaks = seq(0, 32, by=2.5),
+                       expand = c(0,0))+
+    labs(x = "Departamentos",
+         caption = "Participação % do departamento na sacola de compras do perfil",
+         fill = element_blank())+
+    theme_minimal() +
+    theme(legend.box.spacing = unit(5, "mm"),
+          panel.grid.major.y = element_blank(),
+          panel.grid.minor.x = element_blank(),
+          plot.title = element_text(size=16),
+          axis.title = element_text(size = 14),
+          axis.text = element_text(size = 12),
+          legend.text = element_text(size = 12)
+          )+
+    coord_flip()
+})
+```
+
+```{r}
+rsconnect::setAccountInfo(name='helenagaidys',
+			  token='6FAE30B086BF640BDFA7B67821262765',
+			  secret='08NLZJRQJrXKYP9lqlIiGUHRcMwRy9u/TLpNVRng')
+```
+
