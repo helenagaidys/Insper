@@ -319,7 +319,7 @@ renderPlot({
 
 ```{r}
 rsconnect::setAccountInfo(name='helenagaidys',
-			  token='6FAE30B086BF640BDFA7B67821262765',
-			  secret='08NLZJRQJrXKYP9lqlIiGUHRcMwRy9u/TLpNVRng')
+			  token='XXX',
+			  secret='XXX')
 ```
 
