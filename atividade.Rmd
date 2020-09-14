@@ -1,0 +1,647 @@
+---
+title: "Trabalho Feature Engineering"
+author: "Helena Boin Gaidys"
+date: "09/08/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message=FALSE)
+```
+
+*OBJETIVO DO TRABALHO:* O objetivo deste trabalho é clusterizar supermercados semelhantes a partir das seguintes variáveis:
+
+-- dummies dos grupos de supermercados (se a loja não pertence a nenhum grupo, ela ficará em um grupo chamado 'sem grupo')
+
+-- correlações entre os preços semanais de café para cada loja
+
+-- correlações entre as quantidades semanais vendidas de café para cada loja
+
+-- correlações entre as receitas semanais de café para cada loja
+
+-- quantidade de marcas de café para cada loja
+
+-- quantidade de tipos de café para cada loja
+
+-- quantidade de embalagens de café para cada loja
+
+-- correlações entre as receitas médias semanais de café para cada grupo
+
+-- dummies dos bairros das lojas
+
+-- dummies dos distritos das lojas
+
+-- correlações entre os tickets médios semanais das lojas
+
+-- correlações entre os tickets médios semanais dos grupos
+
+As correlações foram calculadas pois desejava-se evitar o problema de flutuação do valor ao longo do tempo. Com isso, a base utilizada para o agrupamento possui apenas 120 observações, quantidade total de lojas distintas que tem na base original.
+
+O ticket médio foi usado a fim de identificar o público alvo da loja ou do grupo.
+
+Receita média foi utilizada pois há uma grande relação entre o preço e a quantidade. Por isso, criou-se uma nova feature que identificasse essa relação. 
+
+A coluna descrição foi dividida em 3 novas variáveis: marca, tipo de café e embalagem do café. Depois disso, fez-se a soma de quantidade de marcas de café que cada loja vende, a fim de observar a variedade da loja. O mesmo foi feito para embalagem e tipo de café, com o mesmo objetivo.
+
+O método de agrupamento utilizado foi o k-means. 
+
+# Bibliotecas
+```{r libs, warning=FALSE}
+
+if(!require(tidyverse)){install.packages("tidyverse"); library(tidyverse)}
+if(!require(lubridate)){install.packages("lubridate"); library(lubridate)}
+if(!require(inspectdf)){install.packages("inspectdf"); library(inspectdf)}
+if(!require(Hmisc)){install.packages("Hmisc"); library(Hmisc)}
+if(!require(caret)){install.packages("caret"); library(caret)}
+if(!require(factoextra)){install.packages("factoextra"); library(factoextra)}
+
+```
+
+# Lendo os dados
+```{r dados}
+
+dados <- read.csv("data/atividade.csv")
+
+dados %>% glimpse
+
+```
+
+# Analisando NAs na base
+```{r NAs}
+
+dados %>% inspectdf::inspect_na() %>% arrange(desc(pcnt)) %>% show_plot()
+
+```
+
+# Feature Engineering
+
+## Criando variáveis de data
+```{r data}
+
+#ajustando a data para formato de data
+dados <- dados %>% 
+  mutate(data_data = ymd(data))
+
+#ano
+dados <- dados %>%
+  mutate(ano = lubridate::year(data_data))
+
+#mês
+dados <- dados %>% 
+  mutate(mes = lubridate::month(data_data))
+
+#dia da semana
+dados <- dados %>% 
+  mutate(dow = lubridate::wday(data_data))
+
+#semana do ano
+dados <- dados %>% 
+  mutate(woy = lubridate::week(data_data))
+
+#quantidade de dias de cada mês
+dados <- dados %>% 
+  mutate(dias_mes = monthDays(data_data))
+
+dados <- dados %>% 
+  filter(ano == 2018)
+
+```
+
+Foi decidido filtrar apenas os dados de 2018, pois há poucas semanas de 2017, conforme visto na tabela acima.
+
+## Ajustando a variável codigo_grupo
+
+Agora não há mais dados faltantes.
+```{r codigo_grupo}
+
+dados <- dados %>% 
+  mutate(codigo_grupo = ifelse(is.na(codigo_grupo), "sem grupo", codigo_grupo))
+
+dados %>% inspectdf::inspect_na() %>% arrange(desc(pcnt)) %>% show_plot()
+
+```
+
+## Receita diária de café por loja
+```{r receita}
+
+dados <- dados %>% 
+  mutate(receita = preco * qtd)
+
+```
+
+## Receita diária média de café por dia da semana
+
+A receita média de café é maior às quartas e aos sábados.
+```{r receita x dow}
+
+dados %>% 
+  group_by(dow) %>% 
+  summarise(receita_dia_media = mean(receita)) %>% 
+  ggplot(aes(x=dow, y=receita_dia_media)) + 
+  geom_bar(stat="identity") + 
+  labs(x="dia da semana", y="receita média")
+
+```
+
+No entanto, o faturamento médio da loja não se altera durante os dias da semana. Isso mostra que o consumo de café tem um comportamento diferente aos demais itens da loja.
+```{r faturamento x dow}
+
+dados <- dados %>%
+  mutate(fat_diario = importe_total / dias_mes)
+
+dados %>%
+  group_by(dow) %>% 
+  summarise(fat_dia_medio = mean(fat_diario)) %>% 
+  ggplot(aes(x=dow, y=fat_dia_medio)) + 
+  geom_bar(stat="identity") + 
+  labs(x="dia da semana", y="faturamento médio")
+
+```
+
+
+## Receita média semanal por semana do ano
+
+A receita média de café varia de acordo com as semanas do ano.
+```{r receita x woy}
+
+dados %>% 
+  group_by(ano, woy) %>% 
+  summarise(receita_semana_media = mean(receita)) %>% 
+  ggplot(aes(x=woy, y=receita_semana_media)) + 
+  geom_bar(stat="identity") + 
+  labs(x="semana do ano", y="receita média")
+
+```
+
+No entanto, o faturamento médio da loja altera pouco durante as semanas do ano. Isso mostra que o consumo de café tem um comportamento diferente aos demais itens da loja.
+```{r fat x woy}
+
+dados %>%
+  group_by(ano,woy) %>% 
+  summarise(fat_dia_medio = mean(fat_diario)) %>%
+  ggplot(aes(x=woy, y=fat_dia_medio)) + 
+  geom_bar(stat="identity") + 
+  labs(x="dia da semana", y="faturamento médio")
+
+```
+
+## Correlação de preços médios semanais de café por loja
+```{r corr. preco loja, warning=FALSE}
+
+cor_preco <- dados %>% 
+  group_by(loja, woy) %>%
+  summarise(preco_semanal = mean(preco)) %>% 
+  group_by(loja) %>% 
+  summarise(cor_preco = cor(preco_semanal, woy))
+
+dados <- inner_join(dados, cor_preco, by = "loja")
+
+```
+### Interpretando os resultados das correlações
+
+Correlação positiva dos preços significa uma tendência de aumento de preços ao longo das semanas, conforme pode-se ver no primeiro gráfico para a loja 210331505. Já uma correlação negativa demonstra uma tendência de queda de preços ao longo das semanas, conforme visto no gráfico 2 para a loja 363643533. Quando a correlação é próxima à zero, os preços são aleatórios (gráfico 3).
+```{r interpretacao corr, warning=FALSE}
+
+dados %>% 
+  group_by(loja, woy) %>%
+  summarise(preco_semanal = mean(preco)) %>%
+  filter(loja == 210331505) %>% 
+  ggplot(aes(x = woy, y = preco_semanal)) + 
+  geom_point() +
+  labs(x = "Semana do Ano",
+       y = "Preço Médio Semanal",
+       title = "Loja 210331505")
+
+dados %>% 
+  group_by(loja, woy) %>%
+  summarise(preco_semanal = mean(preco)) %>%
+  filter(loja == 363643533) %>% 
+  ggplot(aes(x = woy, y = preco_semanal)) + 
+  geom_point() +
+  labs(x = "Semana do Ano",
+       y = "Preço Médio Semanal",
+       title = "Loja 363643533")
+
+dados %>% 
+  group_by(loja, woy) %>%
+  summarise(preco_semanal = mean(preco)) %>%
+  filter(loja == 42829274) %>% 
+  ggplot(aes(x = woy, y = preco_semanal)) + 
+  geom_point() +
+  labs(x = "Semana do Ano",
+       y = "Preço Médio Semanal",
+       title = "Loja 42829274")
+
+```
+
+## Correlação de quantidades médias semanais de café por loja
+```{r corr. qtd loja, warning=FALSE}
+
+cor_qtd <- dados %>% 
+  group_by(loja, woy) %>%
+  summarise(qtd_semanal = mean(qtd)) %>% 
+  group_by(loja) %>% 
+  summarise(cor_qtd = cor(qtd_semanal, woy))
+
+dados <- inner_join(dados, cor_qtd, by = "loja")
+
+```
+
+## Correlação de receitas médias semanais de café por loja
+```{r corr receita loja, warning=FALSE}
+
+cor_receita_loja <- dados %>% 
+  group_by(loja, woy) %>%
+  summarise(receita_semanal = mean(receita)) %>% 
+  group_by(loja) %>% 
+  summarise(cor_receita_loja = cor(receita_semanal, woy))
+
+dados <- inner_join(dados, cor_receita_loja, by = "loja")
+
+```
+
+## Ticket médio para cada loja
+```{r ticket medio loja, warning=FALSE}
+
+ticket_medio_loja <- dados %>% 
+  group_by(loja) %>% 
+  summarise(ticket_medio_loja = mean(importe_total / ticket_total))
+
+dados <- inner_join(dados, ticket_medio_loja, by = "loja")
+
+```
+
+## Ticket médio para cada grupo
+```{r ticket medio grupo, warning=FALSE}
+
+ticket_medio_grupo <- dados %>% 
+  group_by(codigo_grupo) %>% 
+  summarise(ticket_medio_grupo = mean(importe_total / ticket_total))
+
+dados <- inner_join(dados, ticket_medio_grupo, by = "codigo_grupo")
+
+```
+
+## Correlação entre as receitas médias semanais para cada grupo
+```{r receita media grupo, warning=FALSE}
+
+cor_receita_grupo <- dados %>% 
+  group_by(codigo_grupo, woy) %>%
+  summarise(receita_semanal = mean(receita)) %>% 
+  group_by(codigo_grupo) %>% 
+  summarise(cor_receita_grupo = cor(receita_semanal, woy))
+
+dados <- inner_join(dados, cor_receita_grupo, by = "codigo_grupo")
+
+```
+
+## Variável descrição
+
+### Descrições distintas
+
+Há 53 descrições distintas.
+```{r descricoes distintas}
+
+descricao_distinct <- dados %>% distinct(descricao)
+
+descricao_distinct
+
+```
+
+
+### Palavras distintas
+```{r palavras distintas}
+
+descricao <- str_split(descricao_distinct$descricao, " ")
+
+palavras <- as.tibble(unlist(descricao))
+
+palavras %>% 
+  group_by(value) %>% 
+  table()
+
+```
+
+### Marcas
+```{r marca}
+
+descricao_distinct %>% 
+  mutate(marca = case_when(str_detect(descricao, "CORACOES") ~ "3 CORACOES",
+                   str_detect(descricao, "PILAO") ~ "PILAO",
+                   str_detect(descricao, "MELITA") ~ "MELITTA",
+                   str_detect(descricao, "MELITTA") ~ "MELITTA",
+                   str_detect(descricao, "MOKA") ~ "MOKA",
+                   str_detect(descricao, "PELE") ~ "PELE",
+                   TRUE ~ "OUTRO"))
+
+```
+
+### Tipo de café
+```{r tipo}
+
+descricao_distinct %>% 
+  mutate(tipo = case_when(str_detect(descricao, "EXT") ~ "EXTRA FORTE",
+                           str_detect(descricao, "FORT") ~ "FORTE",
+                           str_detect(descricao, "DESC") ~ "DESCAFEINADO",
+                           str_detect(descricao, "GOURMET") ~ "GOURMET",
+                           str_detect(descricao, "GRANISSIMO") ~ "GRANISSIMO",
+                           str_detect(descricao, "INTENSO") ~ "INTENSO",
+                          str_detect(descricao, "TRAD") ~ "TRADICIONAL",
+                          str_detect(descricao, "ORGANICO") ~ "ORGANICO",
+                          str_detect(descricao, "PREMIUM") ~ "PREMIUM",
+                          TRUE ~ "OUTRO"))
+
+```
+
+### Embalagens
+```{r embalagem}
+
+descricao_distinct %>% 
+  mutate(embalagem = case_when(str_detect(descricao, "ALM") ~ "ALMOFADA",
+                          str_detect(descricao, "POUCH") ~ "POUCH",
+                          str_detect(descricao, "STAND") ~ "POUCH",
+                          str_detect(descricao, "PG") ~ "PG",
+                          str_detect(descricao, "V/P") ~ "VACUO",
+                          str_detect(descricao, "PACK") ~ "PACK",
+                          str_detect(descricao, "VACUO") ~ "VACUO",
+                          TRUE ~ "OUTRO"))
+
+```
+
+### Criando variáveis de marca, tipo de café e embalagens
+```{r var marca, tipo, embalagem}
+
+dados <- dados %>% 
+  mutate(marca = case_when(str_detect(descricao, "CORACOES") ~ "3CORACOES",
+                           str_detect(descricao, "PILAO") ~ "PILAO",
+                           str_detect(descricao, "MELITA") ~ "MELITTA",
+                           str_detect(descricao, "MELITTA") ~ "MELITTA",
+                           str_detect(descricao, "MOKA") ~ "MOKA",
+                           str_detect(descricao, "PELE") ~ "PELE",
+                           TRUE ~ "OUTRO"),
+         tipo = case_when(str_detect(descricao, "EXT") ~ "EXTRA_FORTE",
+                          str_detect(descricao, "FORT") ~ "FORTE",
+                          str_detect(descricao, "DESC") ~ "DESCAFEINADO",
+                          str_detect(descricao, "GOURMET") ~ "GOURMET",
+                          str_detect(descricao, "GRANISSIMO") ~ "GRANISSIMO",
+                          str_detect(descricao, "INTENSO") ~ "INTENSO",
+                          str_detect(descricao, "TRAD") ~ "TRADICIONAL",
+                          str_detect(descricao, "ORGANICO") ~ "ORGANICO",
+                          str_detect(descricao, "PREMIUM") ~ "PREMIUM",
+                          TRUE ~ "OUTRO"),
+         embalagem = case_when(str_detect(descricao, "ALM") ~ "ALMOFADA",
+                               str_detect(descricao, "POUCH") ~ "POUCH",
+                               str_detect(descricao, "STAND") ~ "POUCH",
+                               str_detect(descricao, "PG") ~ "PG",
+                               str_detect(descricao, "V/P") ~ "VACUO",
+                               str_detect(descricao, "PACK") ~ "PACK",
+                               str_detect(descricao, "VACUO") ~ "VACUO",
+                               TRUE ~ "OUTRO"))
+
+```
+
+## Quantidade de marcas por loja
+```{r qtd marcas}
+
+qtd_marcas <- dados %>% 
+  group_by(loja, marca) %>% 
+  summarise(qtd = length(unique(marca))) %>% 
+  group_by(loja) %>% 
+  summarise(qtd_marcas = sum(qtd))
+
+dados <- inner_join(dados, qtd_marcas, by = "loja")
+
+```
+
+## Quantidade de tipos de café por loja
+```{r qtd tipos}
+
+qtd_tipos <- dados %>% 
+  group_by(loja, tipo) %>% 
+  summarise(qtd = length(unique(tipo))) %>% 
+  group_by(loja) %>% 
+  summarise(qtd_tipos = sum(qtd))
+
+dados <- inner_join(dados, qtd_tipos, by = "loja")
+
+```
+
+## Quantidade de embalagens de café por loja
+```{r qtd embalagens}
+
+qtd_embalagens <- dados %>% 
+  group_by(loja, embalagem) %>% 
+  summarise(qtd = length(unique(embalagem))) %>% 
+  group_by(loja) %>% 
+  summarise(qtd_embalagens = sum(qtd))
+
+dados <- inner_join(dados, qtd_embalagens, by = "loja")
+
+```
+
+## Agrupando por loja
+```{r agrupamento loja}
+
+dados %>% glimpse
+
+#selecionando as variáveis
+dados_filtrados <- dados %>%
+  select(c(loja, codigo_grupo, bairro, distrtito, cor_preco, cor_qtd, cor_receita_loja, ticket_medio_loja, ticket_medio_grupo,
+           cor_receita_grupo, qtd_marcas, qtd_tipos, qtd_embalagens))
+
+dados_filtrados %>% glimpse
+
+#pegando as 120 lojas e suas informações
+dados_filtrados2 <- dados_filtrados %>% unique()
+
+dados_filtrados2 %>% glimpse
+
+```
+
+## Ajustando os NAs
+
+Considerando que a correlação de preços tem dados faltantes, é de se supor que não há correlação entre os preços para aquela loja. Então faz sentido substituir o dado faltante por zero, já que correlação zero também indica que não há correlação.
+```{r NAs 2}
+
+dados_filtrados2 %>% inspectdf::inspect_na() %>% arrange(desc(pcnt)) %>% show_plot()
+
+dados_filtrados2 <- dados_filtrados2 %>% 
+  mutate(cor_preco = ifelse(is.na(cor_preco), 0, cor_preco))
+
+```
+
+
+## Criando dummies
+
+```{r dummies}
+
+#bairro
+dados_filtrados2$bairro <- factor(dados_filtrados2$bairro)
+bairro <- dummyVars("~bairro", data = dados_filtrados2)
+dados_filtrados2 <- cbind(dados_filtrados2, predict(bairro, dados_filtrados2))
+
+#distrito
+dados_filtrados2$distrtito <- factor(dados_filtrados2$distrtito)
+distrito <- dummyVars("~distrtito", data = dados_filtrados2)
+dados_filtrados2 <- cbind(dados_filtrados2, predict(distrito, dados_filtrados2))
+
+#codigo grupo
+dados_filtrados2$codigo_grupo <- factor(dados_filtrados2$codigo_grupo)
+codigo_grupo <- dummyVars("~codigo_grupo", data = dados_filtrados2)
+dados_filtrados2 <- cbind(dados_filtrados2, predict(codigo_grupo, dados_filtrados2))
+
+
+dados_filtrados2 <- dados_filtrados2 %>% 
+  select(-c(codigo_grupo, bairro, distrtito))
+
+dados_filtrados2 %>% glimpse
+
+```
+
+# Kmeans
+
+## Selecionando variáveis para o kmeans
+```{r base kmeans}
+
+dados_kmeans <- dados_filtrados2 %>% 
+  select(-loja)
+
+```
+
+## PCA
+```{r pca}
+pca <- prcomp(dados_kmeans, scale = FALSE)
+
+fviz_eig(pca)
+
+comp <- data.frame(pca$x[,1:2])
+
+dados_pca <- tibble(loja = dados_filtrados2$loja, PC1 = pca$x[,1], PC2 = pca$x[,2])
+
+```
+
+## Método do cotovelo
+```{r cotovelo}
+#método do cotovelo para k ideal
+criterio <- function(k) kmeans(comp, k)$tot.withinss
+
+estudo <- tibble(k = 2:20) %>% 
+  mutate(w = map_dbl(k, criterio))
+
+estudo %>% 
+  ggplot(aes(k, w)) + 
+  geom_point(size = 3) + 
+  geom_line() + 
+  labs(y = "total within sum of squares", x = "k") + 
+  scale_x_continuous(breaks = 1:20)
+```
+
+## Clusterização por loja
+```{r kmeans}
+# especifica k (escolhi k = 4)
+kmedias <- kmeans(comp, centers = 4)
+
+dados_pca <- dados_pca %>% 
+  mutate(cluster = kmedias$cluster)
+
+dados_pca %>% glimpse
+```
+
+
+## Boxplot de PC1
+```{r boxplot PC1}
+dados_pca %>% 
+  mutate(cluster = as.factor(cluster)) %>% 
+  ggplot(aes(cluster, PC1)) + 
+  geom_boxplot()
+```
+
+## Boxplot de PC2
+```{r boxplot PC2}
+dados_pca %>% 
+  mutate(cluster = as.factor(cluster)) %>% 
+  ggplot(aes(cluster, PC2)) + 
+  geom_boxplot()
+```
+
+## Gráfico PC1 x PC2
+```{r gráf cluster}
+dados_pca %>% 
+  mutate(cluster = as.factor(cluster)) %>%
+  ggplot(aes(PC1, PC2, color = cluster)) + 
+  geom_point(size = 3, alpha = .5) + 
+  theme(legend.position = "top") +
+  labs(color = "Cluster",
+       title = "Clusterização de lojas")
+
+```
+
+```{r autovetores}
+pca$rotation[,1:2]
+```
+
+## Unindo a base original com os clusters
+```{r}
+dados_filtrados3 <- inner_join(dados_filtrados2, dados_pca, by = "loja")
+```
+
+
+## Analisando o ticket médio das lojas entre os clusters
+```{r boxplot tkt loja}
+dados_filtrados3 %>% 
+  mutate(cluster = as.factor(cluster)) %>% 
+  ggplot(aes(cluster, ticket_medio_loja)) + 
+  geom_boxplot() +
+  labs(x = "Cluster",
+       y = "Ticket Médio das Lojas")
+```
+
+## Analisando o ticket médio dos grupos entre os clusters
+```{r boxplot tkt grupo}
+dados_filtrados3 %>% 
+  mutate(cluster = as.factor(cluster)) %>% 
+  ggplot(aes(cluster, ticket_medio_grupo)) + 
+  geom_boxplot() +
+  labs(x = "Cluster",
+       y = "Ticket Médio dos Grupos")
+```
+
+## Analisando a quantidade de marcas entre os clusters
+```{r boxplot qtd marcas}
+dados_filtrados3 %>% 
+  mutate(cluster = as.factor(cluster)) %>% 
+  ggplot(aes(cluster, qtd_marcas)) + 
+  geom_boxplot() +
+  labs(x = "Cluster",
+       y = "Quantidade de marcas distintas vendida")
+```
+
+## Analisando a variedade de tipos de café entre os clusters
+```{r boxplot qtd tipos}
+dados_filtrados3 %>% 
+  mutate(cluster = as.factor(cluster)) %>% 
+  ggplot(aes(cluster, qtd_tipos)) + 
+  geom_boxplot() +
+  labs(x = "Cluster",
+       y = "Quantidade de tipos de café distintos vendida")
+```
+
+## Analisando a quantidade de embalagens entre os clusters
+```{r boxplot qtd embalagens}
+dados_filtrados3 %>% 
+  mutate(cluster = as.factor(cluster)) %>% 
+  ggplot(aes(cluster, qtd_embalagens)) + 
+  geom_boxplot() +
+  labs(x = "Cluster",
+       y = "Quantidade de embalagens distintas vendida")
+```
+
+Lojas gourmet: Para o cluster 1, o ticket médio da loja e do grupo de supermercado são os fatores mais relevantes para a formação do agrupamento. Variedade de tipos e de embalagens de café também são relevantes. Tem como variável importante não pertencer a nenhum grupo de supermercado, mas o ticket médio da loja e do grupo são mais altos que dos outros grupos.
+
+Lojas populares: O cluster 2 também são lojas menores de distritos menos nobres de São Paulo. Quantidade de marcas é um ponto importante para o agrupamento desse cluster, tendo mais variedade que os outros grupos. O ticket médio é menor para essas lojas.
+
+Lojas de bairro nobre: O cluster 3 tem bastante outlier em que o mais importante é o ticket médio da loja e variedade de tipos de café. Como tem como variável importante não pertencer a nenhum grupo, são consideradas lojas de bairro. Porém, seu ticket médio é mais alto e possuem mais variedades de tipo de café, então aparenta ser de partes mais nobres de São Paulo.
+
+Lojas pequenas: Por fim, o cluster 4 tem a mediana próxima a zero tanto para PC1, quanto para PC2. Esse cluster é mais difícil de identificar suas qualidades. Porém há algumas lojas, analisando verticalmente o gráfico de PC1 contra PC2, do lado positivo da componente principal 2. Isso significa que as variáveis de ticket médio da loja e quantidade de tipos de café são as mais importantes para determinar esse grupo. Como o ticket médio é mais baixo, são lojas menores.
+
+
